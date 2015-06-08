@@ -6,23 +6,27 @@ __author__ = 'BING'
 import urllib2
 import cookielib
 import re
-from bs4 import BeautifulSoup
-import xlsxwriter
 import time
 import codecs
 import sys
-import  database
+import threading
+from Queue import Queue
+from bs4 import BeautifulSoup
+
+import database
+
 reload(sys)
 sys.setdefaultencoding('utf8')
 
-class commentCraw(object):
+class commentCraw(threading.Thread):
 
-    def __init__(self):
+    def __init__(self,queue):
+        threading.Thread.__init__(self)
         self.baseurl = 'http://t.dianping.com/ajax/detailDealRate?'
         self.user_agent = 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 \
         (KHTML, like Gecko) Chrome/38.0.2125.111 Safari/537.36'
         self.headers = {'User-Agent': self.user_agent}
-        self.conn = database.database()
+        self.queue = queue
 
     #通过商户id号获取指定页的评论
     def getdeal(self,dealgroupid,pageno):
@@ -42,7 +46,7 @@ class commentCraw(object):
             print e.reason
             #若被服务器识别出，则休眠5分钟再次发出请求
             time.sleep(300)
-            self.getdeal(dealgroupid,pageno)
+            self.getdeal(dealgroupid, pageno)
         except Exception, e:
             print e
             return None
@@ -63,25 +67,41 @@ class commentCraw(object):
                     items = re.findall(pattern, str(comment))
                     for item in items:
                         data = [shopname,item[0],item[1].strip('\n')]
-                        self.conn.insert(data)
+                        mLock.acquire()
+                        conn.insert(data)
+                        mLock.release()
             pageno += 1
 
     #读取保存商户id和名称的文件，获取所有评论
     def run(self):
-        self.conn.connect()
-        with codecs.open('shopid.txt', 'r', 'utf-8') as f:
-            for line in f.readlines():
-                shop = str(line.strip())
-                shop = shop.split('_')
-                self.getcomment(shop[1], shop[0])
-        self.conn.close()
+        print '线程开始工作'
+        while True:
+            dealgroupid, shopname = self.queue.get()
+            self.getcomment(dealgroupid, shopname)
+            self.queue.task_done()
 
 if __name__ == '__main__':
     start = time.ctime()
     print start
-    commenthandler = commentCraw()
-    commenthandler.run()
+    #同步锁
+    mLock = threading.Lock()
+    queue = Queue()
+    comments = [i for i in codecs.open('shopid.txt', 'r', 'utf-8').readlines()]
+    #将任务以tuple的形式放入队列中
+    for comment in comments:
+        shop = str(comment.strip())
+        shop = shop.split('_')
+        queue.put((shop[1], shop[0]))
+    conn = database.database()
+    conn.connect()
+    #创建4个工作线程
+    for x in range(4):
+        commenthandler = commentCraw(queue)
+        commenthandler.daemon = True
+        commenthandler.start()
+    queue.join()
+    if conn.conn:
+        conn.close()
     end = time.ctime()
     print end
     print end-start
-    raw_input()

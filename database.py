@@ -14,6 +14,9 @@ class database(object):
         self.conn = mysql.connector.connect(user='root',password='123456',database='dazhong',use_unicode=True)
         self.cursor = self.conn.cursor()
 
+    def getCursor(self):
+        return self.conn.cursor()
+
     def insert(self,comments):
         try:
             self.cursor.execute('insert into comments values (%s,%s ,%s)', comments)
@@ -22,6 +25,5 @@ class database(object):
             print e.message
 
     def close(self):
-        self.cursor.close()
         self.conn.close()
 
